@@ -23,6 +23,7 @@ import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
+import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.event.ActionEvent;
@@ -41,6 +42,8 @@ import java.util.List;
 import javax.swing.AbstractAction;
 import javax.swing.JComponent;
 import javax.swing.JFrame;
+import javax.swing.JOptionPane;
+import javax.swing.JViewport;
 import javax.swing.KeyStroke;
 import javax.swing.event.UndoableEditEvent;
 import javax.swing.event.UndoableEditListener;
@@ -205,8 +208,10 @@ DiagramEditorNotification, DiagramOperations, NodeChangeListener {
    */
   private void setToDiagramSize() {
     setPreferredSize(new Dimension(
-      (int) (diagram.getSize().getWidth() + MARGIN_RIGHT + MARGIN_LEFT),
-      (int) (diagram.getSize().getHeight() + MARGIN_BOTTOM + MARGIN_TOP)));
+      (int) ((diagram.getSize().getWidth() + MARGIN_RIGHT + MARGIN_LEFT)
+        * scaling.getScaleFactor()),
+      (int) ((diagram.getSize().getHeight() + MARGIN_BOTTOM + MARGIN_TOP)
+        * scaling.getScaleFactor())));
     invalidate();
   }
 
@@ -251,7 +256,29 @@ DiagramEditorNotification, DiagramOperations, NodeChangeListener {
    */
   public void deleteSelection() {
     Collection<DiagramElement> elements = getSelectedElements();
+    if (elements.size() > 1) {
+      int answer = JOptionPane.showConfirmDialog(this,
+        "Se eliminar\u00e1n " + elements.size() + " elementos. "
+        + "\u00bfDesea continuar?", "Confirmar eliminaci\u00f3n",
+        JOptionPane.YES_NO_OPTION);
+      if (answer != JOptionPane.YES_OPTION) return;
+    }
     execute(new DeleteElementCommand(this, elements));
+  }
+
+  /**
+   * Ajusta el zoom y la posicion visible para ver todo el diagrama en la
+   * ventana. Solo cambia la escala y el scroll, no los elementos.
+   */
+  public void fitToWindow() {
+    if (!(getParent() instanceof JViewport)) return;
+    JViewport viewport = (JViewport) getParent();
+    if (viewport.getWidth() <= 0 || viewport.getHeight() <= 0) return;
+    Dimension canvas = getTotalCanvasSize();
+    double scaleX = (double) viewport.getWidth() / canvas.width;
+    double scaleY = (double) viewport.getHeight() / canvas.height;
+    setScaling(new Scaling(Math.min(1.0, Math.min(scaleX, scaleY))));
+    viewport.setViewPosition(new Point(0, 0));
   }
   /**
    * Pastes into this diagram the handed Elements
@@ -271,9 +298,9 @@ DiagramEditorNotification, DiagramOperations, NodeChangeListener {
 		clonedElements.put(elem, copia);
 	}
 	
-	// hasta aquí tengo el hash de cada objeto con su clon (del nuevo diagrama)
+	// hasta aquÃ­ tengo el hash de cada objeto con su clon (del nuevo diagrama)
 	// ahora debo iterar por cada Connection en elements y rehacer sus conexiones
-	// tomaré el ejemplo desde PasteElementCommand.
+	// tomarÃ© el ejemplo desde PasteElementCommand.
 	for(DiagramElement elem : elements){
 		if(elem instanceof Connection){
 			Connection currentConnection = (Connection)elem;
@@ -340,6 +367,7 @@ DiagramEditorNotification, DiagramOperations, NodeChangeListener {
     if (toScreen) {
       // Scaling is only interesting if rendering to screen
       scaleDiagram(g2d);
+      bounds = toDiagramBounds(bounds);
     } else {
       diagram.setGridVisible(false);
       background = Color.WHITE;
@@ -400,6 +428,20 @@ DiagramEditorNotification, DiagramOperations, NodeChangeListener {
   private void scaleDiagram(Graphics2D g2d) {
     double scaleFactor = scaling.getScaleFactor();
     g2d.scale(scaleFactor, scaleFactor);
+  }
+
+  /**
+   * Convierte el area a repintar (pixeles de pantalla) a coordenadas del
+   * diagrama, para que se pinte todo lo visible cuando hay zoom.
+   * @param bounds the bounds in screen pixels
+   * @return the bounds in diagram coordinates
+   */
+  private Rectangle toDiagramBounds(Rectangle bounds) {
+    double factor = scaling.getScaleFactor();
+    int x = (int) Math.floor(bounds.x / factor);
+    int y = (int) Math.floor(bounds.y / factor);
+    return new Rectangle(x, y, (int) Math.ceil(bounds.width / factor) + 2,
+      (int) Math.ceil(bounds.height / factor) + 2);
   }
 
   // ************************************************************************
@@ -593,6 +635,8 @@ DiagramEditorNotification, DiagramOperations, NodeChangeListener {
    */
   public void setScaling(Scaling aScaling) {
     scaling = aScaling;
+    setToDiagramSize();
+    revalidate();
     repaint();
   }
 

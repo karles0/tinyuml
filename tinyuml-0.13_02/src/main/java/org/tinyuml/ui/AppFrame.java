@@ -23,6 +23,7 @@ import java.awt.BorderLayout;
 import java.awt.Component;
 import java.awt.Desktop;
 import java.awt.Dimension;
+import java.awt.GridLayout;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.io.File;
@@ -30,9 +31,11 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedList;
+import java.util.List;
 import java.util.Map;
 import java.util.Timer;
 import java.util.TimerTask;
@@ -49,8 +52,13 @@ import javax.swing.filechooser.FileNameExtensionFilter;
 import org.tinyuml.draw.Label;
 import org.tinyuml.draw.DiagramElement;
 import org.tinyuml.draw.LabelChangeListener;
+import org.tinyuml.draw.LabelSource;
 import org.tinyuml.model.UmlModel;
 import org.tinyuml.util.AppCommandListener;
+import org.tinyuml.umldraw.shared.NoteElement;
+import org.tinyuml.umldraw.structure.ClassElement;
+import org.tinyuml.umldraw.structure.ComponentElement;
+import org.tinyuml.umldraw.structure.PackageElement;
 import org.tinyuml.umldraw.structure.StructureDiagram;
 import org.tinyuml.model.UmlModelImpl;
 import org.tinyuml.ui.commands.ModelReader;
@@ -80,6 +88,8 @@ implements EditorStateListener, AppCommandListener, SelectionListener {
   private JTabbedPane tabbedPane;
   private JLabel coordLabel = new JLabel("    ");
   private JLabel memLabel = new JLabel("    ");
+  private JLabel countLabel = new JLabel("", JLabel.CENTER);
+  private JLabel selectionLabel = new JLabel("", JLabel.CENTER);
   private UmlModel umlModel;
   private DiagramEditor currentEditor;
   private transient Timer timer = new Timer();
@@ -213,6 +223,8 @@ implements EditorStateListener, AppCommandListener, SelectionListener {
                               label.getText());
       }
     });
+    updateCountLabel(currentEditor);
+    updateSelectionLabel(currentEditor);
   }
 
   /**
@@ -241,6 +253,10 @@ implements EditorStateListener, AppCommandListener, SelectionListener {
   private void installStatusbar() {
     JPanel statusbar = new JPanel(new BorderLayout());
     statusbar.add(coordLabel, BorderLayout.WEST);
+    JPanel infoPanel = new JPanel(new GridLayout(2, 1));
+    infoPanel.add(countLabel);
+    infoPanel.add(selectionLabel);
+    statusbar.add(infoPanel, BorderLayout.CENTER);
     statusbar.add(memLabel, BorderLayout.EAST);
     getContentPane().add(statusbar, BorderLayout.SOUTH);
   }
@@ -284,6 +300,7 @@ implements EditorStateListener, AppCommandListener, SelectionListener {
     // spring loading is implemented here
     staticToolbarManager.doClick("SELECT_MODE");
     updateMenuAndToolbars(editor);
+    updateCountLabel(editor);
   }
 
   /**
@@ -291,6 +308,43 @@ implements EditorStateListener, AppCommandListener, SelectionListener {
    */
   public void elementRemoved(DiagramEditor editor) {
     updateMenuAndToolbars(editor);
+    updateCountLabel(editor);
+  }
+
+  /**
+   * Cuenta los elementos del diagrama (sin relaciones) y actualiza la
+   * barra de estado.
+   * @param editor the editor
+   */
+  private void updateCountLabel(DiagramEditor editor) {
+    // 0 = package, 1 = class, 2 = component, 3 = note
+    int[] counts = new int[4];
+    countElements(editor.getDiagram().getChildren(), counts);
+    int total = counts[0] + counts[1] + counts[2] + counts[3];
+    countLabel.setText(String.format("Total Items: %02d | Package: %02d | "
+      + "Class: %02d | Component: %02d | Note: %02d",
+      total, counts[0], counts[1], counts[2], counts[3]));
+  }
+
+  /**
+   * Recorre los elementos y suma por categoria. Las conexiones no entran en
+   * ningun caso, y los paquetes se recorren por dentro.
+   * @param elements the elements to count
+   * @param counts the counters
+   */
+  private void countElements(List<DiagramElement> elements, int[] counts) {
+    for (DiagramElement element : elements) {
+      if (element instanceof PackageElement) {
+        counts[0]++;
+        countElements(((PackageElement) element).getChildren(), counts);
+      } else if (element instanceof ClassElement) {
+        counts[1]++;
+      } else if (element instanceof ComponentElement) {
+        counts[2]++;
+      } else if (element instanceof NoteElement) {
+        counts[3]++;
+      }
+    }
   }
 
   /**
@@ -324,6 +378,44 @@ implements EditorStateListener, AppCommandListener, SelectionListener {
     toolbarmanager.enableButton("COPY", hasSelection);
      
     toolbarmanager.enableButton("DELETE", hasSelection);
+    updateSelectionLabel(getCurrentEditor());
+  }
+
+  /**
+   * Muestra en la barra de estado el elemento seleccionado y cuantos hay
+   * seleccionados. Si lo seleccionado es el propio diagrama, no cuenta.
+   * @param editor the editor
+   */
+  private void updateSelectionLabel(DiagramEditor editor) {
+    List<DiagramElement> selected = new ArrayList<DiagramElement>();
+    for (DiagramElement element : editor.getSelectedElements()) {
+      if (!(element instanceof StructureDiagram)) selected.add(element);
+    }
+    String info = "Sin selecci\u00f3n";
+    if (selected.size() == 1) {
+      info = describeElement(selected.get(0));
+    } else if (selected.size() > 1) {
+      info = "Varios elementos";
+    }
+    selectionLabel.setText("Seleccionado: " + info
+      + " | Cantidad seleccionada: " + selected.size());
+  }
+
+  /**
+   * Devuelve la categoria y el nombre de un elemento.
+   * @param element the element
+   * @return text like "Class - Class 1"
+   */
+  private String describeElement(DiagramElement element) {
+    String category = "Relation";
+    if (element instanceof PackageElement) category = "Package";
+    else if (element instanceof ClassElement) category = "Class";
+    else if (element instanceof ComponentElement) category = "Component";
+    else if (element instanceof NoteElement) category = "Note";
+    if (!(element instanceof LabelSource)) return category;
+    String name = ((LabelSource) element).getLabelText();
+    if (name == null || name.trim().length() == 0) return category;
+    return category + " - " + name.trim().replace('\n', ' ');
   }
 
   // ************************************************************************
@@ -629,7 +721,7 @@ implements EditorStateListener, AppCommandListener, SelectionListener {
 	  if(hasSelection)
 	    lastCopiedElements = getCurrentEditor().getSelectedElements();
 
-	  //adicionalmente, hay que habilitar el botón PASTE!
+	  //adicionalmente, hay que habilitar el botÃ³n PASTE!
 	  menumanager.enableMenuItem("PASTE", hasSelection);
 	  toolbarmanager.enableButton("PASTE", hasSelection);
   }
